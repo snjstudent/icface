@@ -25,17 +25,18 @@ def is_image_file(filename):
 def make_dataset(dir):
     images = []
     assert os.path.isdir(dir), '%s is not a valid directory' % dir
-    train=np.loadtxt('/home/esa/Downloads/files/test_vox1.txt',dtype=str)
-    
+    train = np.loadtxt('/home/esa/Downloads/files/test_vox1.txt', dtype=str)
+
     for root, _, fnames in sorted(os.walk(dir)):
-        identity=os.path.basename(os.path.dirname(os.path.dirname(root)))
-        if np.isin(identity,train):
+        identity = os.path.basename(os.path.dirname(os.path.dirname(root)))
+        if np.isin(identity, train):
             for fname in fnames:
                 if is_image_file(fname):
                     path = os.path.join(root, fname)
                     images.append(path)
 
     return images
+
 
 def make_grouped_dataset(dir):
     images = []
@@ -50,6 +51,7 @@ def make_grouped_dataset(dir):
         if len(paths) > 0:
             images.append(paths)
     return images
+
 
 def default_loader(path):
     return Image.open(path).convert('RGB')
