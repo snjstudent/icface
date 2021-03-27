@@ -12,7 +12,9 @@ class Train_Dataset(torch.utils.data.Dataset):
         self.img_pathes = open(img_path_file).readlines()
 
     def get_au_from_imgpath(self, img_path: str) -> torch.Tensor:
-        csv_data = pd.read_csv(img_path.split(".")[0]+".csv")
+        idx = int(img_path.split("/")[1].split("/")[1].split(".")[0])
+        csv_data = pd.read_csv("csv/"+img_path.split("/")
+                               [1].split("/")[0]+".csv")[idx:idx+1]
         au_and_pose_idx = list(range(296, 299)) + list(range(679, 696))
         au_and_pose = csv_data[csv_data.columns[au_and_pose_idx]]
         f = 0
