@@ -15,9 +15,9 @@ from torch.utils.tensorboard import SummaryWriter, writer
 opt = TrainOptions().parse()
 dataset = Train_Dataset(opt, 'train.txt')
 dataset_val = Train_Dataset(opt, 'val.txt')
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
 dataloader_val = torch.utils.data.DataLoader(
-    dataset_val, batch_size=32, shuffle=True)
+    dataset_val, batch_size=1, shuffle=True)
 model = create_model(opt)
 writer = SummaryWriter()
 #visualizer = Visualizer(opt)
