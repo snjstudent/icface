@@ -250,10 +250,99 @@ class Pix2PixModel(BaseModel):
             # self.loss_generator_attribute =  self.recon + self.R+self.sal_loss2_attribute.detach()
             # self.loss_generator_attribute.backward()
 
-            # 識別機に関する損失
+    def validate(self):
+        for i in range(0, self.P_B.size(1)):
+            self.netG.zero_grad()
+            self.netDA.zero_grad()
+            self.netGN.zero_grad()
+            # 念の為
+            for optimizer in self.optimizers:
+                optimizer.zero_grad()
 
-            # neutraizerじゃない方の生成器
-            self.recon_Light_attribute = 0
+            # 入力するAU
+            self.param_B = self.P_B[0, i, :].unsqueeze(0)
+            self.param_B = self.param_B.view(-1, 20).float()
+
+            # 入力画像
+            self.real_A = self.input_A[:, 0:3, :, :]
+            self.real_A.requires_grad = True
+
+            # 中立顔のAUを作成
+            self.AUN = self.param_B.view(self.param_B.size(0), self.param_B.size(1), 1, 1).expand(
+                self.param_B.size(0), self.param_B.size(1), 128, 128)/100000
+            self.AUN[:, 0:3] = 0.5
+
+            # 中立顔の作成
+            self.fake_B = self.netGN(
+                torch.cat([self.real_A, self.AUN], dim=1))
+
+            # 本当かどうか、予測したAU
+            # This is the discriminator for G_N, that predicts real/fake and AUs
+            a = self.netDA(self.fake_B)
+            pred_fake, E_con = a[0], a[1]
+            # pred_fake, E_con = self.netDA(self.fake_B)
+
+            # 識別に関する損失
+            self.loss_G_GANE = self.criterionGAN(pred_fake, True)  # GAN loss
+            # 予測したAUに関する損失
+            self.sal_loss2 = (self.criterionL1(E_con, torch.LongTensor([[0.5 for _ in range(3)]+[0 for i in range(len(E_con[0])-3)]]).cuda())) * \
+                self.opt.lambda_A  # AU regression loss
+            # Facial attribute reconstruction lossの計算のため
+            # とりあえず一回、中立顔のAUをNeutraizerじゃ無い方にいれて中立顔の生成をしている
+            with torch.no_grad():
+                self.tar = self.netG(torch.cat([self.fake_B, self.AUN], dim=1))
+                # Here self.netG is the G_A in the equaltion.I calculate the ground truth for the neutral image as self.tar. Note that the
+                # gradient is not passing to the G_A. Otherwise G_A will know what G_N is doing and can be able to generates
+                # everything by itself making neutral image blank.**
+
+            # Neutraierとそうでないので生成した中立顔が同一かの損失
+            # (Facial attribute reconstruction loss)
+            self.recon = self.criterionL1(self.fake_B, self.tar.detach(
+            ))*self.opt.lambda_B  # calulated |G_N(L_s)-G_A(L_s)|
+            # grey scale image for LightCNN
+            self.fake_B_gray = self.fake_B[:, 0, :, :] * 0.299 + self.fake_B[:, 1, :, :] * \
+                0.587 + self.fake_B[:, 2, :, :] * \
+                0.114
+            self.real_A_gray = self.real_A[:, 0, :, :] * 0.299 + self.real_A[:, 1, :, :] * \
+                0.587 + self.real_A[:, 2, :, :] * \
+                0.114
+
+            # LightCNNに入れた後のidentityは同じであるという損失
+            # 中立顔と、入力した顔で計算
+            self.recon_Light = self.criterionVGG(
+                self.fake_B.detach(), self.real_A.detach())*0.5   # LightCNN loss
+
+            # 入力するAUをGANに入れる形式に変換
+            AUR = self.param_B.view(self.param_B.size(0), self.param_B.size(1), 1, 1).expand(
+                self.param_B.size(0), self.param_B.size(1), 128, 128)
+
+            # Again passing neutral image to G_A with final AUs to generate the reenacted output. (which is the actual GT)**
+            # 目的とするAUで目的とする画像を生成
+            self.fake_B_re = self.netG(torch.cat([self.fake_B, AUR], dim=1))
+            # 再生成損失
+            self.R = self.criterionL1(self.fake_B_re.detach(), self.real_A.detach(
+            ))*self.opt.lambda_B   # calculate the recon loss
+            # これでneutraizerの損失らしい？？？
+            # self.recon_Light=0
+            self.loss_GR = self.loss_G_GANE + self.sal_loss2 + \
+                self.recon + self.R+self.recon_Light
+
+            # grey scale image for LightCNN
+            self.fake_B_re_gray = self.fake_B_re[:, 0, :, :] * 0.299 + self.fake_B_re[:, 1, :, :] * \
+                0.587 + self.fake_B_re[:, 2, :, :] * 0.114
+            # LightCNNに入れた後のidentityは同じであるという損失
+            # 生成顔と、正解データで計算
+            self.recon_Light_attribute = self.criterionVGG(
+                self.fake_B_re.detach(), self.real_A.detach())*0.5
+            b = self.netDA(self.fake_B_re.detach())
+            pred_fake_attribute, E_con_attribute = b[0], b[1]
+            self.loss_G_GANE_attribute = self.criterionGAN(
+                pred_fake_attribute, False)
+            # 予測したAUに関する損失
+            self.sal_loss2_attribute = (self.criterionL1(E_con_attribute, self.param_B.detach())) * \
+                self.opt.lambda_A
+
+            self.loss_discriminator = self.loss_G_GANE_attribute+self.recon_Light_attribute
 
     def test(self):
 
