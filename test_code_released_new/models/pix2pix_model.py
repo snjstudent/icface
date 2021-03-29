@@ -60,9 +60,9 @@ class Pix2PixModel(BaseModel):
         if self.isTrain:
             use_sigmoid = opt.no_lsgan
 
-            self.netDA = torch.nn.DataParallel(networks.define_D(opt.input_nc, opt.ndf,
-                                                                 opt.which_model_netD,
-                                                                 opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids), device_ids=self.gpu_ids)
+            self.netDA = networks.define_D(opt.input_nc, opt.ndf,
+                                           opt.which_model_netD,
+                                           opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, self.gpu_ids)
 
         self.schedulers = []
         self.optimizers = []
@@ -81,7 +81,7 @@ class Pix2PixModel(BaseModel):
         self.optimizers.append(self.optimizer_G)
         self.optimizers.append(self.optimizer_GN)
 
-     #   self.optimizers.append(self.optimizer_DA)
+        self.optimizers.append(self.optimizer_DA)
         # self.optimizers.append(self.optimizer_I)
 
     #    for optimizer in self.optimizers:
@@ -95,7 +95,8 @@ class Pix2PixModel(BaseModel):
         #    self.load_network(self.I_E, 'I_E', opt.which_epoch)
 
             if self.isTrain:
-                self.load_network(self.netDA, 'DA', opt.which_epoch)
+                self.load_network(self.netDA, 'DA',
+                                  opt.which_epoch, self.optimizer_DA)
 
 #        self.generator_test = copy.deepcopy(self.netG)
 #        self.generator_testN = copy.deepcopy(self.netGN)
@@ -136,7 +137,7 @@ class Pix2PixModel(BaseModel):
 
         self.P_B = P_B
 
-        self.image_paths = input['A_paths']  # if AtoB else 'B_paths']
+        # self.image_paths = input['A_paths']  # if AtoB else 'B_paths']
 
     def train(self):
         # self.fake_B: generated neutral image
@@ -171,15 +172,15 @@ class Pix2PixModel(BaseModel):
 
             # 本当かどうか、予測したAU
             # This is the discriminator for G_N, that predicts real/fake and AUs
-            pred_fake, E_con = self.netDA(self.fake_B)
+            a = self.netDA(self.fake_B)
+            pred_fake, E_con = a[0], a[1]
+            # pred_fake, E_con = self.netDA(self.fake_B)
 
             # 識別に関する損失
             self.loss_G_GANE = self.criterionGAN(pred_fake, True)  # GAN loss
-
             # 予測したAUに関する損失
-            self.sal_loss2 = (self.criterionL1(E_con, self.Neut)) * \
+            self.sal_loss2 = (self.criterionL1(E_con, torch.LongTensor([[0.5 for _ in range(3)]+[0 for i in range(len(E_con[0])-3)]]).cuda())) * \
                 self.opt.lambda_A  # AU regression loss
-
             # Facial attribute reconstruction lossの計算のため
             # とりあえず一回、中立顔のAUをNeutraizerじゃ無い方にいれて中立顔の生成をしている
             with torch.no_grad():
@@ -192,17 +193,19 @@ class Pix2PixModel(BaseModel):
             # (Facial attribute reconstruction loss)
             self.recon = self.criterionL1(self.fake_B, self.tar.detach(
             ))*self.opt.lambda_B  # calulated |G_N(L_s)-G_A(L_s)|
-
             # grey scale image for LightCNN
             self.fake_B_gray = self.fake_B[:, 0, :, :] * 0.299 + self.fake_B[:, 1, :, :] * \
                 0.587 + self.fake_B[:, 2, :, :] * \
                 0.114
-
+            self.real_A_gray = self.real_A[:, 0, :, :] * 0.299 + self.real_A[:, 1, :, :] * \
+                0.587 + self.real_A[:, 2, :, :] * \
+                0.114
+            print(self.real_A_gray.size())
             # LightCNNに入れた後のidentityは同じであるという損失
             # 中立顔と、入力した顔で計算
-            self.recon_Light = self.criterionLight(self.fake_B_gray.unsqueeze(
-                1), self.real_A_gray.detach())*0.5   # LightCNN loss
-
+            self.recon_Light = self.criterionVGG(
+                self.fake_B.detach(), self.real_A.detach())*0.5   # LightCNN loss
+            print(self.recon_Light)
             # 入力するAUをGANに入れる形式に変換
             AUR = self.param_B.view(self.param_B.size(0), self.param_B.size(1), 1, 1).expand(
                 self.param_B.size(0), self.param_B.size(1), 128, 128)
@@ -211,42 +214,46 @@ class Pix2PixModel(BaseModel):
             # 目的とするAUで目的とする画像を生成
             self.fake_B_re = self.netG(torch.cat([self.fake_B, AUR], dim=1))
             # 再生成損失
-            self.R = self.criterionL1(self.fake_B_re, self.real_B.detach(
+            self.R = self.criterionL1(self.fake_B_re.detach(), self.real_A.detach(
             ))*self.opt.lambda_B   # calculate the recon loss
             # これでneutraizerの損失らしい？？？
+            # self.recon_Light=0
             self.loss_GR = self.loss_G_GANE + self.sal_loss2 + \
-                self.recon + self.recon_Light + self.R
+                self.recon + self.R+self.recon_Light
 
             # neutraizer backward
-            self.loss_GR.backward()
+            self.loss_GR.backward(retain_graph=True)
             self.optimizer_GN.step()
-
+            self.optimizer_DA.zero_grad()
+            self.optimizer_G.zero_grad()
+            self.optimizer_GN.zero_grad()
             # grey scale image for LightCNN
             self.fake_B_re_gray = self.fake_B_re[:, 0, :, :] * 0.299 + self.fake_B_re[:, 1, :, :] * \
                 0.587 + self.fake_B_re[:, 2, :, :] * 0.114
             # LightCNNに入れた後のidentityは同じであるという損失
             # 生成顔と、正解データで計算
-            self.recon_Light_attribute = self.criterionLight(self.fake_B_gray_re.unsqueeze(
-                1), self.real_B_gray.detach())*0.5
-            pred_fake_attribute, E_con_attribute = self.netDA(self.fake_B_re)
+            self.recon_Light_attribute = self.criterionVGG(
+                self.fake_B_re.detach(), self.real_A.detach())*0.5
+            b = self.netDA(self.fake_B_re.detach())
+            pred_fake_attribute, E_con_attribute = b[0], b[1]
             self.loss_G_GANE_attribute = self.criterionGAN(
                 pred_fake_attribute, False)
             # 予測したAUに関する損失
-            self.sal_loss2_attribute = (self.criterionL1(E_con_attribute, self.param_B)) * \
+            self.sal_loss2_attribute = (self.criterionL1(E_con_attribute, self.param_B.detach())) * \
                 self.opt.lambda_A
+            self.sal_loss2_attribute.backward(retain_graph=True)
 
-            # 識別機に関する損失
-            self.loss_discriminator = self.sal_loss2+self.sal_loss2_attribute + \
-                self.loss_G_GANE+self.loss_G_GANE_attribute
+            self.loss_discriminator = self.loss_G_GANE_attribute+self.recon_Light_attribute
             self.loss_discriminator.backward()
             self.optimizer_DA.step()
+            self.optimizer_G.step()
+            # self.loss_generator_attribute =  self.recon + self.R+self.sal_loss2_attribute.detach()
+            # self.loss_generator_attribute.backward()
+
+            # 識別機に関する損失
 
             # neutraizerじゃない方の生成器
-            self.loss_generator_attribute = self.loss_G_GANE + self.sal_loss2 + \
-                self.recon + self.recon_Light + self.R+self.sal_loss2_attribute + \
-                self.loss_G_GANE_attribute
-            self.loss_generator_attribute.backward()
-            self.optimizer_G.step()
+            self.recon_Light_attribute = 0
 
     def test(self):
 

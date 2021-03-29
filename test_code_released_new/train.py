@@ -13,14 +13,12 @@ from torch.utils.tensorboard import SummaryWriter, writer
 
 
 opt = TrainOptions().parse()
-dataset = Train_Dataset(opt, 'img_path.txt')
+dataset = Train_Dataset(opt, 'train.txt')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
 model = create_model(opt)
 writer = SummaryWriter()
 #visualizer = Visualizer(opt)
 # create website
-web_dir = os.path.join(opt.results_dir, opt.name, '%s_%s' %
-                       (opt.phase, opt.which_epoch))
 #webpage = html.HTML(web_dir, 'Experiment = %s, Phase = %s, Epoch = %s' % (opt.name, opt.phase, opt.which_epoch))
 # test
 
@@ -46,14 +44,14 @@ def train():
             add_write_loss("Attribute/identity",
                            model.recon_Light_attribute, count)
             add_write_loss("Attribute/AU", model.sal_loss2_attribute, count)
-            add_write_loss("Dis/All", model.loss_discriminator, count)
-            add_write_loss("Dis/Neu", model.loss_G_GANE+model.sal_loss2, count)
-            add_write_loss(
-                "Dis/Attribute", model.loss_G_GANE_attribute+model.sal_loss2_attribute, count)
-            add_write_loss(
-                "Gen/Neu", model.loss_GR, count)
-            add_write_loss(
-                "Gen/Attribute", model.loss_generator_attribute, count)
+            # add_write_loss("Dis/All", model.loss_discriminator, count)
+            # add_write_loss("Dis/Neu", model.loss_G_GANE+model.sal_loss2, count)
+            # add_write_loss(
+            #     "Dis/Attribute", model.loss_G_GANE_attribute+model.sal_loss2_attribute, count)
+            # add_write_loss(
+            #     "Gen/Neu", model.loss_GR, count)
+            # add_write_loss(
+            #     "Gen/Attribute", model.loss_generator_attribute, count)
         torch.save(model.state_dict(), f"model_{epoch}.pth")
 
 

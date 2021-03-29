@@ -47,11 +47,15 @@ class BaseModel():
             network.cuda(gpu_ids[0])
 
     # helper loading function that can be used by subclasses
-    def load_network(self, network, network_label, epoch_label,optimizer):
+    def load_network(self, network, network_label, epoch_label, optimizer):
         save_filename = '%s_net_%s.pth' % (epoch_label, network_label)
         save_path = os.path.join(self.save_dir, save_filename)
-        network.load_state_dict(torch.load(save_path)['state_dict'],strict=False)
-        optimizer.load_state_dict(torch.load(save_path)['optimizer'])
+        network.load_state_dict(torch.load(save_path)[
+                                'state_dict'], strict=False)
+        try:
+            optimizer.load_state_dict(torch.load(save_path)['optimizer'])
+        except:
+            pass
        # network.load_state_dict(torch.load(save_path))
 
     # update learning rate (called once every epoch)
